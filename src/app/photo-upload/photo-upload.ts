@@ -1,51 +1,76 @@
-import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  ChangeDetectionStrategy,
+  signal,
+  computed,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { GridCell, PhotoData, SavedLayout } from '../models/photo-layout.model';
 
 @Component({
   selector: 'app-photo-upload',
-  standalone: true,
   imports: [CommonModule],
   templateUrl: './photo-upload.html',
   styleUrls: ['./photo-upload.css'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PhotoUploadComponent implements OnInit, OnDestroy {
-  cells: GridCell[] = [];
-  uploadedPhotos: PhotoData[] = [];
-  maxPhotos = 16;
+  // Core state
+  cells = signal<GridCell[]>([]);
+  uploadedPhotos = signal<PhotoData[]>([]);
+  maxPhotos = signal(16);
 
-  gridRows = 4;
-  gridCols = 4;
-  columnWidths: number[] = [];
-  rowHeights: number[] = [];
+  gridRows = signal(4);
+  gridCols = signal(4);
+  columnWidths = signal<number[]>([]);
+  rowHeights = signal<number[]>([]);
 
-  isDraggingFile = false;
-  isDraggingFromSidebar = false;
-  draggedPhoto: PhotoData | null = null;
+  // UI state
+  isDraggingFile = signal(false);
+  isDraggingFromSidebar = signal(false);
+  draggedPhoto = signal<PhotoData | null>(null);
 
-  selectedCell: GridCell | null = null;
-  isDraggingPhoto = false;
+  selectedCell = signal<GridCell | null>(null);
+  isDraggingPhoto = signal(false);
 
-  isDraggingColumnDivider = false;
-  isDraggingRowDivider = false;
-  draggedDividerIndex = -1;
-  dividerDragStart = 0;
+  isDraggingColumnDivider = signal(false);
+  isDraggingRowDivider = signal(false);
+  draggedDividerIndex = signal(-1);
 
   dragStartX = 0;
   dragStartY = 0;
   originalPhotoPosition = { x: 0, y: 0, scale: 1 };
 
-  hoveredCell: GridCell | null = null;
-  isPreviewMode = false;
+  hoveredCell = signal<GridCell | null>(null);
+  isPreviewMode = signal(false);
 
-  constructor(private cdr: ChangeDetectorRef) {}
+  // Computed values
+  photoCountText = computed(() => `${this.uploadedPhotos().length} / ${this.maxPhotos()}`);
+  photosOnCanvas = computed(() => this.cells().filter((c) => c.photo).length);
+  visibleCells = computed(() => this.cells().filter((cell) => this.isVisible(cell)));
+  totalColumnFr = computed(() => this.columnWidths().reduce((sum, width) => sum + width, 0));
+  totalRowFr = computed(() => this.rowHeights().reduce((sum, height) => sum + height, 0));
+  gridTemplateColumns = computed(() =>
+    this.columnWidths()
+      .map((w) => `${w}fr`)
+      .join(' '),
+  );
+  gridTemplateRows = computed(() =>
+    this.rowHeights()
+      .map((h) => `${h}fr`)
+      .join(' '),
+  );
+
+  constructor() {}
 
   ngOnInit() {
     this.initializeGrid();
   }
 
   ngOnDestroy() {
-    this.uploadedPhotos.forEach((photo) => {
+    this.uploadedPhotos().forEach((photo) => {
       if (photo.dataUrl.startsWith('blob:')) {
         URL.revokeObjectURL(photo.dataUrl);
       }
@@ -55,14 +80,17 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   // ==================== GRID INITIALIZATION ====================
 
   initializeGrid() {
-    this.cells = [];
-    this.columnWidths = Array(this.gridCols).fill(1);
-    this.rowHeights = Array(this.gridRows).fill(1);
+    const newCells: GridCell[] = [];
+    const cols = this.gridCols();
+    const rows = this.gridRows();
+
+    this.columnWidths.set(Array(cols).fill(1));
+    this.rowHeights.set(Array(rows).fill(1));
 
     let id = 0;
-    for (let row = 1; row <= this.gridRows; row++) {
-      for (let col = 1; col <= this.gridCols; col++) {
-        this.cells.push({
+    for (let row = 1; row <= rows; row++) {
+      for (let col = 1; col <= cols; col++) {
+        newCells.push({
           id: `cell-${id++}`,
           row: row,
           col: col,
@@ -72,6 +100,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
         });
       }
     }
+
+    this.cells.set(newCells);
   }
 
   // ==================== FILE UPLOAD ====================
@@ -79,19 +109,19 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   onDragOver(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingFile = true;
+    this.isDraggingFile.set(true);
   }
 
   onDragLeave(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingFile = false;
+    this.isDraggingFile.set(false);
   }
 
   onDrop(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingFile = false;
+    this.isDraggingFile.set(false);
 
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
@@ -114,7 +144,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     const imageFiles = files.filter((file) => file.type.startsWith('image/'));
     console.log('Image files:', imageFiles.length);
 
-    const remainingSlots = this.maxPhotos - this.uploadedPhotos.length;
+    const remainingSlots = this.maxPhotos() - this.uploadedPhotos().length;
     const filesToProcess = imageFiles.slice(0, remainingSlots);
 
     if (filesToProcess.length === 0) {
@@ -122,7 +152,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
         alert('No image files selected. Please select image files (jpg, png, etc.)');
       } else {
         alert(
-          `Maximum ${this.maxPhotos} photos allowed. You already have ${this.uploadedPhotos.length} photos.`,
+          `Maximum ${this.maxPhotos()} photos allowed. You already have ${this.uploadedPhotos().length} photos.`,
         );
       }
       return;
@@ -145,14 +175,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
             rotation: 0,
           };
 
-          this.uploadedPhotos.push(photoData);
+          this.uploadedPhotos.update((photos) => [...photos, photoData]);
           loadedCount++;
 
           console.log(`Loaded ${loadedCount}/${totalToLoad}:`, file.name);
 
           if (loadedCount === totalToLoad) {
-            this.uploadedPhotos = [...this.uploadedPhotos];
-            console.log('All photos loaded. Total:', this.uploadedPhotos.length);
+            console.log('All photos loaded. Total:', this.uploadedPhotos().length);
           }
         }
       };
@@ -169,8 +198,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   // ==================== DRAG FROM SIDEBAR TO GRID ====================
 
   onPhotoThumbnailDragStart(event: DragEvent, photo: PhotoData) {
-    this.isDraggingFromSidebar = true;
-    this.draggedPhoto = photo;
+    this.isDraggingFromSidebar.set(true);
+    this.draggedPhoto.set(photo);
 
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = 'copy';
@@ -179,9 +208,9 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   onPhotoThumbnailDragEnd() {
-    this.isDraggingFromSidebar = false;
-    this.draggedPhoto = null;
-    this.hoveredCell = null;
+    this.isDraggingFromSidebar.set(false);
+    this.draggedPhoto.set(null);
+    this.hoveredCell.set(null);
   }
 
   onCanvasDragOver(event: DragEvent) {
@@ -199,15 +228,15 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.hoveredCell = cell;
+    this.hoveredCell.set(cell);
   }
 
   onCellDragLeave(event: DragEvent, cell: GridCell) {
     event.preventDefault();
     event.stopPropagation();
 
-    if (this.hoveredCell?.id === cell.id) {
-      this.hoveredCell = null;
+    if (this.hoveredCell()?.id === cell.id) {
+      this.hoveredCell.set(null);
     }
   }
 
@@ -215,18 +244,18 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
 
-    if (!this.draggedPhoto) return;
+    if (!this.draggedPhoto()) return;
     if (this.isCellOccupied(cell)) return;
 
     cell.photo = {
-      ...this.draggedPhoto,
+      ...this.draggedPhoto()!,
       position: { x: 50, y: 50, scale: 1 },
     };
 
-    this.selectedCell = cell;
-    this.draggedPhoto = null;
-    this.isDraggingFromSidebar = false;
-    this.hoveredCell = null;
+    this.selectedCell.set(cell);
+    this.draggedPhoto.set(null);
+    this.isDraggingFromSidebar.set(false);
+    this.hoveredCell.set(null);
   }
 
   // ==================== GRID RESIZING ====================
@@ -235,17 +264,16 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
 
-    this.isDraggingColumnDivider = true;
-    this.draggedDividerIndex = columnIndex;
+    this.isDraggingColumnDivider.set(true);
+    this.draggedDividerIndex.set(columnIndex);
     this.dragStartX = event.clientX;
 
     const onMouseMove = (e: MouseEvent) => this.onColumnDividerMouseMove(e);
     const onMouseUp = () => {
-      this.isDraggingColumnDivider = false;
-      this.draggedDividerIndex = -1;
+      this.isDraggingColumnDivider.set(false);
+      this.draggedDividerIndex.set(-1);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      this.cdr.detectChanges();
     };
 
     document.addEventListener('mousemove', onMouseMove);
@@ -253,7 +281,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   onColumnDividerMouseMove(event: MouseEvent) {
-    if (!this.isDraggingColumnDivider || this.draggedDividerIndex === -1) return;
+    if (!this.isDraggingColumnDivider() || this.draggedDividerIndex() === -1) return;
 
     const canvas = document.querySelector('.grid-canvas') as HTMLElement;
     if (!canvas) return;
@@ -262,21 +290,23 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     const totalWidth = rect.width;
 
     const deltaX = event.clientX - this.dragStartX;
-    const deltaFraction = (deltaX / totalWidth) * this.getTotalColumnFr();
+    const deltaFraction = (deltaX / totalWidth) * this.totalColumnFr();
 
-    const leftCol = this.draggedDividerIndex;
-    const rightCol = this.draggedDividerIndex + 1;
+    const leftCol = this.draggedDividerIndex();
+    const rightCol = this.draggedDividerIndex() + 1;
 
     const minSize = 0.2;
+    const currentWidths = this.columnWidths();
 
-    const newLeftWidth = Math.max(minSize, this.columnWidths[leftCol] + deltaFraction);
-    const newRightWidth = Math.max(minSize, this.columnWidths[rightCol] - deltaFraction);
+    const newLeftWidth = Math.max(minSize, currentWidths[leftCol] + deltaFraction);
+    const newRightWidth = Math.max(minSize, currentWidths[rightCol] - deltaFraction);
 
     if (newLeftWidth >= minSize && newRightWidth >= minSize) {
-      this.columnWidths[leftCol] = newLeftWidth;
-      this.columnWidths[rightCol] = newRightWidth;
+      const updatedWidths = [...currentWidths];
+      updatedWidths[leftCol] = newLeftWidth;
+      updatedWidths[rightCol] = newRightWidth;
+      this.columnWidths.set(updatedWidths);
       this.dragStartX = event.clientX;
-      this.cdr.detectChanges();
     }
   }
 
@@ -284,17 +314,16 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
 
-    this.isDraggingRowDivider = true;
-    this.draggedDividerIndex = rowIndex;
+    this.isDraggingRowDivider.set(true);
+    this.draggedDividerIndex.set(rowIndex);
     this.dragStartY = event.clientY;
 
     const onMouseMove = (e: MouseEvent) => this.onRowDividerMouseMove(e);
     const onMouseUp = () => {
-      this.isDraggingRowDivider = false;
-      this.draggedDividerIndex = -1;
+      this.isDraggingRowDivider.set(false);
+      this.draggedDividerIndex.set(-1);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      this.cdr.detectChanges();
     };
 
     document.addEventListener('mousemove', onMouseMove);
@@ -302,7 +331,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   onRowDividerMouseMove(event: MouseEvent) {
-    if (!this.isDraggingRowDivider || this.draggedDividerIndex === -1) return;
+    if (!this.isDraggingRowDivider() || this.draggedDividerIndex() === -1) return;
 
     const canvas = document.querySelector('.grid-canvas') as HTMLElement;
     if (!canvas) return;
@@ -311,58 +340,46 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     const totalHeight = rect.height;
 
     const deltaY = event.clientY - this.dragStartY;
-    const deltaFraction = (deltaY / totalHeight) * this.getTotalRowFr();
+    const deltaFraction = (deltaY / totalHeight) * this.totalRowFr();
 
-    const topRow = this.draggedDividerIndex;
-    const bottomRow = this.draggedDividerIndex + 1;
+    const topRow = this.draggedDividerIndex();
+    const bottomRow = this.draggedDividerIndex() + 1;
 
     const minSize = 0.2;
+    const currentHeights = this.rowHeights();
 
-    const newTopHeight = Math.max(minSize, this.rowHeights[topRow] + deltaFraction);
-    const newBottomHeight = Math.max(minSize, this.rowHeights[bottomRow] - deltaFraction);
+    const newTopHeight = Math.max(minSize, currentHeights[topRow] + deltaFraction);
+    const newBottomHeight = Math.max(minSize, currentHeights[bottomRow] - deltaFraction);
 
     if (newTopHeight >= minSize && newBottomHeight >= minSize) {
-      this.rowHeights[topRow] = newTopHeight;
-      this.rowHeights[bottomRow] = newBottomHeight;
+      const updatedHeights = [...currentHeights];
+      updatedHeights[topRow] = newTopHeight;
+      updatedHeights[bottomRow] = newBottomHeight;
+      this.rowHeights.set(updatedHeights);
       this.dragStartY = event.clientY;
-      this.cdr.detectChanges();
     }
   }
 
-  getTotalColumnFr(): number {
-    return this.columnWidths.reduce((sum, width) => sum + width, 0);
-  }
-
-  getTotalRowFr(): number {
-    return this.rowHeights.reduce((sum, height) => sum + height, 0);
-  }
-
-  getGridTemplateColumns(): string {
-    return this.columnWidths.map((w) => `${w}fr`).join(' ');
-  }
-
-  getGridTemplateRows(): string {
-    return this.rowHeights.map((h) => `${h}fr`).join(' ');
-  }
-
   resetColumnWidths() {
-    this.columnWidths = Array(this.gridCols).fill(1);
+    this.columnWidths.set(Array(this.gridCols()).fill(1));
   }
 
   resetRowHeights() {
-    this.rowHeights = Array(this.gridRows).fill(1);
+    this.rowHeights.set(Array(this.gridRows()).fill(1));
   }
 
   // ==================== GRID MANAGEMENT ====================
 
   addRow() {
-    this.gridRows++;
-    this.rowHeights.push(1);
-    const newRow = this.gridRows;
-    let id = this.cells.length;
+    this.gridRows.update((rows) => rows + 1);
+    this.rowHeights.update((heights) => [...heights, 1]);
+    const newRow = this.gridRows();
+    const currentCells = this.cells();
+    let id = currentCells.length;
 
-    for (let col = 1; col <= this.gridCols; col++) {
-      this.cells.push({
+    const newCells = [...currentCells];
+    for (let col = 1; col <= this.gridCols(); col++) {
+      newCells.push({
         id: `cell-${id++}`,
         row: newRow,
         col: col,
@@ -371,31 +388,34 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
         photo: undefined,
       });
     }
+    this.cells.set(newCells);
   }
 
   removeRow() {
-    if (this.gridRows <= 1) return;
+    if (this.gridRows() <= 1) return;
 
-    const cellsInLastRow = this.cells.filter((c) => c.row === this.gridRows);
+    const cellsInLastRow = this.cells().filter((c) => c.row === this.gridRows());
     const hasPhotos = cellsInLastRow.some((c) => c.photo);
 
     if (hasPhotos && !confirm('This row has photos. Are you sure you want to delete it?')) {
       return;
     }
 
-    this.cells = this.cells.filter((c) => c.row !== this.gridRows);
-    this.rowHeights.pop();
-    this.gridRows--;
+    this.cells.update((cells) => cells.filter((c) => c.row !== this.gridRows()));
+    this.rowHeights.update((heights) => heights.slice(0, -1));
+    this.gridRows.update((rows) => rows - 1);
   }
 
   addColumn() {
-    this.gridCols++;
-    this.columnWidths.push(1);
-    const newCol = this.gridCols;
-    let id = this.cells.length;
+    this.gridCols.update((cols) => cols + 1);
+    this.columnWidths.update((widths) => [...widths, 1]);
+    const newCol = this.gridCols();
+    const currentCells = this.cells();
+    let id = currentCells.length;
 
-    for (let row = 1; row <= this.gridRows; row++) {
-      this.cells.push({
+    const newCells = [...currentCells];
+    for (let row = 1; row <= this.gridRows(); row++) {
+      newCells.push({
         id: `cell-${id++}`,
         row: row,
         col: newCol,
@@ -404,21 +424,22 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
         photo: undefined,
       });
     }
+    this.cells.set(newCells);
   }
 
   removeColumn() {
-    if (this.gridCols <= 1) return;
+    if (this.gridCols() <= 1) return;
 
-    const cellsInLastCol = this.cells.filter((c) => c.col === this.gridCols);
+    const cellsInLastCol = this.cells().filter((c) => c.col === this.gridCols());
     const hasPhotos = cellsInLastCol.some((c) => c.photo);
 
     if (hasPhotos && !confirm('This column has photos. Are you sure you want to delete it?')) {
       return;
     }
 
-    this.cells = this.cells.filter((c) => c.col !== this.gridCols);
-    this.columnWidths.pop();
-    this.gridCols--;
+    this.cells.update((cells) => cells.filter((c) => c.col !== this.gridCols()));
+    this.columnWidths.update((widths) => widths.slice(0, -1));
+    this.gridCols.update((cols) => cols - 1);
   }
 
   // ==================== CELL INTERACTION ====================
@@ -430,27 +451,27 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     ) {
       return;
     }
-    this.selectedCell = cell;
+    this.selectedCell.set(cell);
   }
 
   onCanvasClick(event: MouseEvent) {
     if (event.target === event.currentTarget) {
-      this.selectedCell = null;
+      this.selectedCell.set(null);
     }
   }
 
   togglePreviewMode() {
-    this.isPreviewMode = !this.isPreviewMode;
-    if (this.isPreviewMode) {
-      this.selectedCell = null;
+    this.isPreviewMode.update((mode) => !mode);
+    if (this.isPreviewMode()) {
+      this.selectedCell.set(null);
     }
   }
 
   removePhotoFromCell(cell: GridCell, event: Event) {
     event.stopPropagation();
     cell.photo = undefined;
-    if (this.selectedCell?.id === cell.id) {
-      this.selectedCell = null;
+    if (this.selectedCell()?.id === cell.id) {
+      this.selectedCell.set(null);
     }
   }
 
@@ -466,10 +487,10 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     const deletedRowSpan = cell.rowSpan;
     const deletedColSpan = cell.colSpan;
 
-    this.cells = this.cells.filter((c) => c.id !== cell.id);
+    this.cells.update((cells) => cells.filter((c) => c.id !== cell.id));
 
-    if (this.selectedCell?.id === cell.id) {
-      this.selectedCell = null;
+    if (this.selectedCell()?.id === cell.id) {
+      this.selectedCell.set(null);
     }
 
     this.autoExpandAdjacentCells(deletedRow, deletedCol, deletedRowSpan, deletedColSpan);
@@ -485,7 +506,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     const deletedColEnd = deletedCol + deletedColSpan - 1;
 
     if (deletedRow > 1) {
-      const cellAbove = this.cells.find(
+      const cellAbove = this.cells().find(
         (c) =>
           c.col === deletedCol && c.colSpan === deletedColSpan && c.row + c.rowSpan === deletedRow,
       );
@@ -497,7 +518,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     }
 
     if (deletedCol > 1) {
-      const cellLeft = this.cells.find(
+      const cellLeft = this.cells().find(
         (c) =>
           c.row === deletedRow && c.rowSpan === deletedRowSpan && c.col + c.colSpan === deletedCol,
       );
@@ -519,7 +540,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
     for (let row = targetRow; row <= targetRowEnd; row++) {
       for (let col = cell.col; col < cell.col + cell.colSpan; col++) {
-        const blocking = this.cells.find(
+        const blocking = this.cells().find(
           (c) =>
             c.id !== cell.id &&
             c.row <= row &&
@@ -533,7 +554,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       }
     }
 
-    return targetRowEnd <= this.gridRows;
+    return targetRowEnd <= this.gridRows();
   }
 
   canExpandRightSafely(cell: GridCell, additionalCols: number, requiredRowSpan: number): boolean {
@@ -546,7 +567,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
     for (let col = targetCol; col <= targetColEnd; col++) {
       for (let row = cell.row; row < cell.row + cell.rowSpan; row++) {
-        const blocking = this.cells.find(
+        const blocking = this.cells().find(
           (c) =>
             c.id !== cell.id &&
             c.row <= row &&
@@ -560,7 +581,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       }
     }
 
-    return targetColEnd <= this.gridCols;
+    return targetColEnd <= this.gridCols();
   }
 
   canExpandDown(cell: GridCell, additionalRows: number): boolean {
@@ -579,15 +600,15 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
 
-    this.isDraggingPhoto = true;
-    this.selectedCell = cell;
+    this.isDraggingPhoto.set(true);
+    this.selectedCell.set(cell);
     this.dragStartX = event.clientX;
     this.dragStartY = event.clientY;
     this.originalPhotoPosition = { ...cell.photo.position };
 
     const onMouseMove = (e: MouseEvent) => this.onPhotoMouseMove(e, cell);
     const onMouseUp = () => {
-      this.isDraggingPhoto = false;
+      this.isDraggingPhoto.set(false);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
@@ -597,7 +618,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   onPhotoMouseMove(event: MouseEvent, cell: GridCell) {
-    if (!this.isDraggingPhoto || !cell.photo) return;
+    if (!this.isDraggingPhoto() || !cell.photo) return;
 
     const deltaX = event.clientX - this.dragStartX;
     const deltaY = event.clientY - this.dragStartY;
@@ -628,13 +649,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   // ==================== CELL SPAN MANAGEMENT ====================
 
   canIncreaseRowSpan(cell: GridCell): boolean {
-    if (cell.row + cell.rowSpan > this.gridRows) {
+    if (cell.row + cell.rowSpan > this.gridRows()) {
       return false;
     }
 
     for (let col = cell.col; col < cell.col + cell.colSpan; col++) {
       const targetRow = cell.row + cell.rowSpan;
-      const blocking = this.cells.find(
+      const blocking = this.cells().find(
         (c) => c.id !== cell.id && c.row === targetRow && c.col === col,
       );
 
@@ -647,13 +668,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   canIncreaseColSpan(cell: GridCell): boolean {
-    if (cell.col + cell.colSpan > this.gridCols) {
+    if (cell.col + cell.colSpan > this.gridCols()) {
       return false;
     }
 
     for (let row = cell.row; row < cell.row + cell.rowSpan; row++) {
       const targetCol = cell.col + cell.colSpan;
-      const blocking = this.cells.find(
+      const blocking = this.cells().find(
         (c) => c.id !== cell.id && c.row === row && c.col === targetCol,
       );
 
@@ -674,8 +695,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
     for (let col = cell.col; col < cell.col + cell.colSpan; col++) {
       const targetRow = cell.row + cell.rowSpan;
-      this.cells = this.cells.filter(
-        (c) => !(c.id !== cell.id && c.row === targetRow && c.col === col),
+      this.cells.update((cells) =>
+        cells.filter((c) => !(c.id !== cell.id && c.row === targetRow && c.col === col)),
       );
     }
 
@@ -697,8 +718,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
     for (let row = cell.row; row < cell.row + cell.rowSpan; row++) {
       const targetCol = cell.col + cell.colSpan;
-      this.cells = this.cells.filter(
-        (c) => !(c.id !== cell.id && c.row === row && c.col === targetCol),
+      this.cells.update((cells) =>
+        cells.filter((c) => !(c.id !== cell.id && c.row === row && c.col === targetCol)),
       );
     }
 
@@ -714,7 +735,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   expandToFillColumn(cell: GridCell, event: Event) {
     event.stopPropagation();
 
-    const maxPossibleRows = this.gridRows - cell.row + 1;
+    const maxPossibleRows = this.gridRows() - cell.row + 1;
 
     for (let targetSpan = cell.rowSpan + 1; targetSpan <= maxPossibleRows; targetSpan++) {
       let canExpand = true;
@@ -722,7 +743,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
       for (let col = cell.col; col < cell.col + cell.colSpan; col++) {
         const targetRow = cell.row + targetSpan - 1;
-        const blocking = this.cells.find(
+        const blocking = this.cells().find(
           (c) => c.id !== cell.id && c.row === targetRow && c.col === col,
         );
 
@@ -740,7 +761,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       }
 
       cellsToDelete.forEach((c) => {
-        this.cells = this.cells.filter((existing) => existing.id !== c.id);
+        this.cells.update((cells) => cells.filter((existing) => existing.id !== c.id));
       });
 
       cell.rowSpan = targetSpan;
@@ -750,7 +771,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   expandToFillRow(cell: GridCell, event: Event) {
     event.stopPropagation();
 
-    const maxPossibleCols = this.gridCols - cell.col + 1;
+    const maxPossibleCols = this.gridCols() - cell.col + 1;
 
     for (let targetSpan = cell.colSpan + 1; targetSpan <= maxPossibleCols; targetSpan++) {
       let canExpand = true;
@@ -758,7 +779,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
       for (let row = cell.row; row < cell.row + cell.rowSpan; row++) {
         const targetCol = cell.col + targetSpan - 1;
-        const blocking = this.cells.find(
+        const blocking = this.cells().find(
           (c) => c.id !== cell.id && c.row === row && c.col === targetCol,
         );
 
@@ -776,7 +797,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       }
 
       cellsToDelete.forEach((c) => {
-        this.cells = this.cells.filter((existing) => existing.id !== c.id);
+        this.cells.update((cells) => cells.filter((existing) => existing.id !== c.id));
       });
 
       cell.colSpan = targetSpan;
@@ -784,13 +805,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   canExpandToFillColumn(cell: GridCell): boolean {
-    if (cell.row + cell.rowSpan > this.gridRows) {
+    if (cell.row + cell.rowSpan > this.gridRows()) {
       return false;
     }
 
     for (let col = cell.col; col < cell.col + cell.colSpan; col++) {
       const targetRow = cell.row + cell.rowSpan;
-      const blocking = this.cells.find(
+      const blocking = this.cells().find(
         (c) => c.id !== cell.id && c.row === targetRow && c.col === col,
       );
 
@@ -803,13 +824,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   canExpandToFillRow(cell: GridCell): boolean {
-    if (cell.col + cell.colSpan > this.gridCols) {
+    if (cell.col + cell.colSpan > this.gridCols()) {
       return false;
     }
 
     for (let row = cell.row; row < cell.row + cell.rowSpan; row++) {
       const targetCol = cell.col + cell.colSpan;
-      const blocking = this.cells.find(
+      const blocking = this.cells().find(
         (c) => c.id !== cell.id && c.row === row && c.col === targetCol,
       );
 
@@ -824,7 +845,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   // ==================== HELPER METHODS ====================
 
   isCellOccupied(cell: GridCell): boolean {
-    return this.cells.some((c) => {
+    return this.cells().some((c) => {
       if (c.id === cell.id) return false;
 
       const occupiesRow = cell.row >= c.row && cell.row < c.row + c.rowSpan;
@@ -835,7 +856,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   isVisible(cell: GridCell): boolean {
-    return !this.cells.some((c) => {
+    return !this.cells().some((c) => {
       if (c.id === cell.id) return false;
 
       const coveredByRow = cell.row >= c.row && cell.row < c.row + c.rowSpan;
@@ -847,8 +868,12 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   clearCanvas() {
     if (confirm('Are you sure you want to remove all photos?')) {
-      this.cells.forEach((cell) => (cell.photo = undefined));
-      this.selectedCell = null;
+      this.cells.update((cells) => {
+        const updatedCells = [...cells];
+        updatedCells.forEach((cell) => (cell.photo = undefined));
+        return updatedCells;
+      });
+      this.selectedCell.set(null);
     }
   }
 
@@ -857,11 +882,11 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   exportLayoutData(): SavedLayout {
     return {
       name: 'My Photo Album',
-      gridRows: this.gridRows,
-      gridCols: this.gridCols,
-      columnWidths: [...this.columnWidths],
-      rowHeights: [...this.rowHeights],
-      cells: this.cells
+      gridRows: this.gridRows(),
+      gridCols: this.gridCols(),
+      columnWidths: [...this.columnWidths()],
+      rowHeights: [...this.rowHeights()],
+      cells: this.cells()
         .filter((cell) => this.isVisible(cell))
         .map((cell) => ({
           id: cell.id,
@@ -873,7 +898,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
           photoPosition: cell.photo?.position,
           photoRotation: cell.photo?.rotation,
         })),
-      photos: this.uploadedPhotos.map((photo) => ({
+      photos: this.uploadedPhotos().map((photo) => ({
         id: photo.id,
         filename: photo.file.name,
         dataUrl: photo.dataUrl,
@@ -882,15 +907,16 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   loadLayoutData(savedLayout: SavedLayout) {
-    this.gridRows = savedLayout.gridRows;
-    this.gridCols = savedLayout.gridCols;
-    this.columnWidths = [...savedLayout.columnWidths];
-    this.rowHeights = [...savedLayout.rowHeights];
-    this.cells = [];
-    this.uploadedPhotos = [];
+    this.gridRows.set(savedLayout.gridRows);
+    this.gridCols.set(savedLayout.gridCols);
+    this.columnWidths.set([...savedLayout.columnWidths]);
+    this.rowHeights.set([...savedLayout.rowHeights]);
+
+    const newPhotos: PhotoData[] = [];
+    const newCells: GridCell[] = [];
 
     savedLayout.photos.forEach((savedPhoto) => {
-      this.uploadedPhotos.push({
+      newPhotos.push({
         id: savedPhoto.id,
         file: new File([], savedPhoto.filename),
         dataUrl: savedPhoto.dataUrl,
@@ -901,10 +927,10 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
     savedLayout.cells.forEach((savedCell) => {
       const photo = savedCell.photoId
-        ? this.uploadedPhotos.find((p) => p.id === savedCell.photoId)
+        ? newPhotos.find((p) => p.id === savedCell.photoId)
         : undefined;
 
-      this.cells.push({
+      newCells.push({
         id: savedCell.id,
         row: savedCell.row,
         col: savedCell.col,
@@ -920,6 +946,9 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
             : undefined,
       });
     });
+
+    this.uploadedPhotos.set(newPhotos);
+    this.cells.set(newCells);
   }
 
   async saveToBackend() {
@@ -929,14 +958,6 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   // ==================== VIEW HELPERS ====================
-
-  getPhotoCountText(): string {
-    return `${this.uploadedPhotos.length} / ${this.maxPhotos}`;
-  }
-
-  getPhotosOnCanvas(): number {
-    return this.cells.filter((c) => c.photo).length;
-  }
 
   getCellStyle(cell: GridCell) {
     return {
@@ -952,32 +973,32 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   isHovered(cell: GridCell): boolean {
-    return this.hoveredCell?.id === cell.id;
-  }
-
-  getVisibleCells(): GridCell[] {
-    return this.cells.filter((cell) => this.isVisible(cell));
+    return this.hoveredCell()?.id === cell.id;
   }
 
   getColumnDividers(): number[] {
-    return Array.from({ length: this.gridCols - 1 }, (_, i) => i);
+    return Array.from({ length: this.gridCols() - 1 }, (_, i) => i);
   }
 
   getRowDividers(): number[] {
-    return Array.from({ length: this.gridRows - 1 }, (_, i) => i);
+    return Array.from({ length: this.gridRows() - 1 }, (_, i) => i);
   }
 
   getColumnDividerPosition(dividerIndex: number): string {
-    const sumWidths = this.columnWidths.slice(0, dividerIndex + 1).reduce((a, b) => a + b, 0);
-    const totalFr = this.getTotalColumnFr();
+    const sumWidths = this.columnWidths()
+      .slice(0, dividerIndex + 1)
+      .reduce((a, b) => a + b, 0);
+    const totalFr = this.totalColumnFr();
     const percentage = (sumWidths / totalFr) * 100;
 
     return `${percentage}%`;
   }
 
   getRowDividerPosition(dividerIndex: number): string {
-    const sumHeights = this.rowHeights.slice(0, dividerIndex + 1).reduce((a, b) => a + b, 0);
-    const totalFr = this.getTotalRowFr();
+    const sumHeights = this.rowHeights()
+      .slice(0, dividerIndex + 1)
+      .reduce((a, b) => a + b, 0);
+    const totalFr = this.totalRowFr();
     const percentage = (sumHeights / totalFr) * 100;
 
     return `${percentage}%`;
