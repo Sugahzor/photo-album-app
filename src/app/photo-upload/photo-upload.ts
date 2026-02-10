@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { GridCell, PhotoData, SavedLayout } from '../models/photo-layout.model';
 
@@ -16,8 +16,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   gridRows = 4;
   gridCols = 4;
-  columnWidths: number[] = []; // fr units for each column
-  rowHeights: number[] = []; // fr units for each row
+  columnWidths: number[] = [];
+  rowHeights: number[] = [];
 
   isDraggingFile = false;
   isDraggingFromSidebar = false;
@@ -26,7 +26,6 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   selectedCell: GridCell | null = null;
   isDraggingPhoto = false;
 
-  // Grid resizing
   isDraggingColumnDivider = false;
   isDraggingRowDivider = false;
   draggedDividerIndex = -1;
@@ -38,6 +37,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   hoveredCell: GridCell | null = null;
   isPreviewMode = false;
+
+  constructor(private cdr: ChangeDetectorRef) {}
 
   ngOnInit() {
     this.initializeGrid();
@@ -55,8 +56,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   initializeGrid() {
     this.cells = [];
-    this.columnWidths = Array(this.gridCols).fill(1); // Equal widths
-    this.rowHeights = Array(this.gridRows).fill(1); // Equal heights
+    this.columnWidths = Array(this.gridCols).fill(1);
+    this.rowHeights = Array(this.gridRows).fill(1);
 
     let id = 0;
     for (let row = 1; row <= this.gridRows; row++) {
@@ -244,11 +245,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       this.draggedDividerIndex = -1;
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      this.cdr.detectChanges();
     };
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   }
+
   onColumnDividerMouseMove(event: MouseEvent) {
     if (!this.isDraggingColumnDivider || this.draggedDividerIndex === -1) return;
 
@@ -256,7 +259,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const totalWidth = rect.width; // No gap subtraction
+    const totalWidth = rect.width;
 
     const deltaX = event.clientX - this.dragStartX;
     const deltaFraction = (deltaX / totalWidth) * this.getTotalColumnFr();
@@ -273,6 +276,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       this.columnWidths[leftCol] = newLeftWidth;
       this.columnWidths[rightCol] = newRightWidth;
       this.dragStartX = event.clientX;
+      this.cdr.detectChanges();
     }
   }
 
@@ -290,11 +294,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       this.draggedDividerIndex = -1;
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      this.cdr.detectChanges();
     };
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   }
+
   onRowDividerMouseMove(event: MouseEvent) {
     if (!this.isDraggingRowDivider || this.draggedDividerIndex === -1) return;
 
@@ -302,7 +308,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const totalHeight = rect.height; // No gap subtraction
+    const totalHeight = rect.height;
 
     const deltaY = event.clientY - this.dragStartY;
     const deltaFraction = (deltaY / totalHeight) * this.getTotalRowFr();
@@ -319,6 +325,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       this.rowHeights[topRow] = newTopHeight;
       this.rowHeights[bottomRow] = newBottomHeight;
       this.dragStartY = event.clientY;
+      this.cdr.detectChanges();
     }
   }
 
@@ -350,7 +357,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   addRow() {
     this.gridRows++;
-    this.rowHeights.push(1); // Add new row with default height
+    this.rowHeights.push(1);
     const newRow = this.gridRows;
     let id = this.cells.length;
 
@@ -377,13 +384,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     }
 
     this.cells = this.cells.filter((c) => c.row !== this.gridRows);
-    this.rowHeights.pop(); // Remove last row height
+    this.rowHeights.pop();
     this.gridRows--;
   }
 
   addColumn() {
     this.gridCols++;
-    this.columnWidths.push(1); // Add new column with default width
+    this.columnWidths.push(1);
     const newCol = this.gridCols;
     let id = this.cells.length;
 
@@ -410,7 +417,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     }
 
     this.cells = this.cells.filter((c) => c.col !== this.gridCols);
-    this.columnWidths.pop(); // Remove last column width
+    this.columnWidths.pop();
     this.gridCols--;
   }
 
@@ -428,6 +435,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   onCanvasClick(event: MouseEvent) {
     if (event.target === event.currentTarget) {
+      this.selectedCell = null;
+    }
+  }
+
+  togglePreviewMode() {
+    this.isPreviewMode = !this.isPreviewMode;
+    if (this.isPreviewMode) {
       this.selectedCell = null;
     }
   }
@@ -914,13 +928,6 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     alert('Layout data logged to console. Check browser console (F12)');
   }
 
-  togglePreviewMode() {
-    this.isPreviewMode = !this.isPreviewMode;
-    if (this.isPreviewMode) {
-      this.selectedCell = null; // Deselect any selected cell
-    }
-  }
-
   // ==================== VIEW HELPERS ====================
 
   getPhotoCountText(): string {
@@ -961,7 +968,6 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   getColumnDividerPosition(dividerIndex: number): string {
-    // Calculate the position as a percentage
     const sumWidths = this.columnWidths.slice(0, dividerIndex + 1).reduce((a, b) => a + b, 0);
     const totalFr = this.getTotalColumnFr();
     const percentage = (sumWidths / totalFr) * 100;
@@ -970,7 +976,6 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   getRowDividerPosition(dividerIndex: number): string {
-    // Calculate the position as a percentage
     const sumHeights = this.rowHeights.slice(0, dividerIndex + 1).reduce((a, b) => a + b, 0);
     const totalFr = this.getTotalRowFr();
     const percentage = (sumHeights / totalFr) * 100;
