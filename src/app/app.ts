@@ -1,11 +1,12 @@
 import { Component, signal } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { PhotoUploadComponent } from './photo-upload/photo-upload';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet],
-  templateUrl: './app.html',
-  styleUrl: './app.css'
+  imports: [PhotoUploadComponent],
+  // templateUrl: './app.html',
+  template: '<app-photo-upload></app-photo-upload>',
+  styleUrl: './app.css',
 })
 export class App {
   protected readonly title = signal('photo-album-app');
