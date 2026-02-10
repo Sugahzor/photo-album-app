@@ -24,6 +24,8 @@ export interface SavedLayout {
   name: string;
   gridRows: number;
   gridCols: number;
+  columnWidths: number[]; // Width for each column (fr units)
+  rowHeights: number[]; // Height for each row (fr units)
   cells: {
     id: string;
     row: number;

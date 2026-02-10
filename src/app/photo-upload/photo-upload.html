@@ -9,8 +9,15 @@
       </span>
       <button
         class="btn btn-secondary"
-        (click)="clearCanvas()"
+        (click)="togglePreviewMode()"
         [disabled]="getPhotosOnCanvas() === 0"
+      >
+        {{ isPreviewMode ? '✏️ Edit Mode' : '👁️ Preview' }}
+      </button>
+      <button
+        class="btn btn-secondary"
+        (click)="clearCanvas()"
+        [disabled]="getPhotosOnCanvas() === 0 || isPreviewMode"
       >
         Clear Photos
       </button>
@@ -59,9 +66,10 @@
           <li>Upload your photos above</li>
           <li>Drag photos onto grid cells</li>
           <li>Click cell to select and show resize controls</li>
-          <li>Click outside cells to hide controls</li>
-          <li>Use ➕ to expand, ⬇️/➡️ to fill</li>
+          <li><strong>Drag dividers between columns/rows to resize</strong></li>
+          <li>Use ➕ to expand cells, ⬇️/➡️ to fill</li>
           <li>Drag photo to reposition, scroll to zoom</li>
+          <li>Click <strong>Preview</strong> to see final result</li>
         </ol>
       </div>
 
@@ -94,7 +102,7 @@
     <!-- Canvas Area -->
     <div class="canvas-wrapper">
       <!-- Grid Controls -->
-      <div class="grid-controls">
+      <div class="grid-controls" *ngIf="!isPreviewMode">
         <div class="control-group">
           <label>Grid Size: {{ gridRows }} × {{ gridCols }}</label>
           <div class="control-buttons">
@@ -118,141 +126,183 @@
             </button>
           </div>
         </div>
-      </div>
-
-      <!-- Grid Canvas - ADDED CLICK HANDLER -->
-      <div
-        class="grid-canvas"
-        [class.dragging-over]="isDraggingFromSidebar"
-        [style.grid-template-rows]="'repeat(' + gridRows + ', 1fr)'"
-        [style.grid-template-columns]="'repeat(' + gridCols + ', 1fr)'"
-        (dragover)="onCanvasDragOver($event)"
-        (click)="onCanvasClick($event)"
-      >
-        <!-- Grid Cell Wrapper (with controls outside) -->
-        <div
-          *ngFor="let cell of getVisibleCells()"
-          class="cell-wrapper"
-          [ngStyle]="getCellStyle(cell)"
-        >
-          <!-- The actual grid cell -->
-          <div
-            [id]="cell.id"
-            class="grid-cell"
-            [class.empty]="!cell.photo"
-            [class.has-photo]="cell.photo"
-            [class.selected]="selectedCell?.id === cell.id"
-            [class.hovered]="isHovered(cell)"
-            [class.occupied]="isCellOccupied(cell)"
-            (click)="onCellClick(cell, $event)"
-            (dragover)="onCellDragOver($event, cell)"
-            (dragleave)="onCellDragLeave($event, cell)"
-            (drop)="onCellDrop($event, cell)"
-          >
-            <!-- Empty Cell -->
-            <div *ngIf="!cell.photo" class="empty-cell-content">
-              <div class="drop-zone-icon">+</div>
-              <div class="cell-info">{{ cell.rowSpan }}×{{ cell.colSpan }}</div>
-            </div>
-
-            <!-- Cell with Photo -->
-            <div *ngIf="cell.photo" class="cell-photo-wrapper" (wheel)="onPhotoWheel($event, cell)">
-              <img
-                [src]="cell.photo.dataUrl"
-                [ngStyle]="getPhotoStyle(cell.photo)"
-                class="cell-photo"
-                (mousedown)="onPhotoMouseDown($event, cell)"
-                draggable="false"
-                alt=""
-              />
-            </div>
-
-            <!-- Cell Controls -->
-            <div class="cell-controls">
-              <button
-                *ngIf="cell.photo"
-                class="btn-icon btn-remove"
-                (click)="removePhotoFromCell(cell, $event)"
-                title="Remove photo"
-              >
-                🗑️
-              </button>
-              <button
-                *ngIf="!cell.photo"
-                class="btn-icon btn-delete-cell"
-                (click)="deleteCell(cell, $event)"
-                title="Delete cell"
-              >
-                ❌
-              </button>
-            </div>
-          </div>
-
-          <!-- Span Controls (outside the cell, inside wrapper) - ONLY SHOW WHEN SELECTED -->
-          <div class="span-controls" *ngIf="selectedCell?.id === cell.id">
-            <!-- Row controls (bottom) -->
-            <div class="span-control-group span-row">
-              <button
-                class="btn-span"
-                (click)="decreaseRowSpan(cell, $event)"
-                [disabled]="cell.rowSpan <= 1"
-                title="Shrink height"
-              >
-                ➖
-              </button>
-              <span class="span-label">{{ cell.rowSpan }}</span>
-              <button
-                class="btn-span"
-                (click)="increaseRowSpan(cell, $event)"
-                [disabled]="!canIncreaseRowSpan(cell)"
-                title="Expand height by 1"
-              >
-                ➕
-              </button>
-              <button
-                class="btn-span btn-expand-all"
-                (click)="expandToFillColumn(cell, $event)"
-                [disabled]="!canExpandToFillColumn(cell)"
-                title="Expand to fill column"
-              >
-                ⬇️
-              </button>
-            </div>
-
-            <!-- Column controls (right) -->
-            <div class="span-control-group span-col">
-              <button
-                class="btn-span"
-                (click)="decreaseColSpan(cell, $event)"
-                [disabled]="cell.colSpan <= 1"
-                title="Shrink width"
-              >
-                ➖
-              </button>
-              <span class="span-label">{{ cell.colSpan }}</span>
-              <button
-                class="btn-span"
-                (click)="increaseColSpan(cell, $event)"
-                [disabled]="!canIncreaseColSpan(cell)"
-                title="Expand width by 1"
-              >
-                ➕
-              </button>
-              <button
-                class="btn-span btn-expand-all"
-                (click)="expandToFillRow(cell, $event)"
-                [disabled]="!canExpandToFillRow(cell)"
-                title="Expand to fill row"
-              >
-                ➡️
-              </button>
-            </div>
+        <div class="control-group">
+          <label>Reset Sizes:</label>
+          <div class="control-buttons">
+            <button class="btn btn-sm" (click)="resetColumnWidths()" title="Reset column widths">
+              Reset Cols
+            </button>
+            <button class="btn btn-sm" (click)="resetRowHeights()" title="Reset row heights">
+              Reset Rows
+            </button>
           </div>
         </div>
       </div>
 
-      <!-- Selected Cell Info - ONLY SHOW WHEN SELECTED -->
-      <div class="info-panel" *ngIf="selectedCell">
+      <!-- Grid Canvas Container -->
+      <div class="grid-canvas-container" [class.preview-mode]="isPreviewMode">
+        <!-- Grid Canvas -->
+        <div
+          class="grid-canvas"
+          [class.dragging-over]="isDraggingFromSidebar && !isPreviewMode"
+          [style.grid-template-rows]="getGridTemplateRows()"
+          [style.grid-template-columns]="getGridTemplateColumns()"
+          (dragover)="!isPreviewMode && onCanvasDragOver($event)"
+          (click)="!isPreviewMode && onCanvasClick($event)"
+        >
+          <!-- Grid Cell Wrapper (with controls outside) -->
+          <div
+            *ngFor="let cell of getVisibleCells()"
+            class="cell-wrapper"
+            [ngStyle]="getCellStyle(cell)"
+          >
+            <!-- The actual grid cell -->
+            <div
+              [id]="cell.id"
+              class="grid-cell"
+              [class.empty]="!cell.photo"
+              [class.has-photo]="!!cell.photo"
+              [class.selected]="selectedCell?.id === cell.id && !isPreviewMode"
+              [class.hovered]="isHovered(cell) && !isPreviewMode"
+              [class.occupied]="isCellOccupied(cell)"
+              [class.preview]="isPreviewMode"
+              (click)="!isPreviewMode && onCellClick(cell, $event)"
+              (dragover)="!isPreviewMode && onCellDragOver($event, cell)"
+              (dragleave)="!isPreviewMode && onCellDragLeave($event, cell)"
+              (drop)="!isPreviewMode && onCellDrop($event, cell)"
+            >
+              <!-- Empty Cell -->
+              <div *ngIf="!cell.photo" class="empty-cell-content">
+                <div class="drop-zone-icon">+</div>
+                <div class="cell-info">{{ cell.rowSpan }}×{{ cell.colSpan }}</div>
+              </div>
+
+              <!-- Cell with Photo -->
+              <div
+                *ngIf="cell.photo"
+                class="cell-photo-wrapper"
+                (wheel)="!isPreviewMode && onPhotoWheel($event, cell)"
+              >
+                <img
+                  [src]="cell.photo.dataUrl"
+                  [ngStyle]="getPhotoStyle(cell.photo)"
+                  class="cell-photo"
+                  [class.no-drag]="isPreviewMode"
+                  (mousedown)="!isPreviewMode && onPhotoMouseDown($event, cell)"
+                  draggable="false"
+                  alt=""
+                />
+              </div>
+
+              <!-- Cell Controls (hidden in preview) -->
+              <div class="cell-controls" *ngIf="!isPreviewMode">
+                <button
+                  *ngIf="cell.photo"
+                  class="btn-icon btn-remove"
+                  (click)="removePhotoFromCell(cell, $event)"
+                  title="Remove photo"
+                >
+                  🗑️
+                </button>
+                <button
+                  *ngIf="!cell.photo"
+                  class="btn-icon btn-delete-cell"
+                  (click)="deleteCell(cell, $event)"
+                  title="Delete cell"
+                >
+                  ❌
+                </button>
+              </div>
+            </div>
+
+            <!-- Span Controls (hidden in preview) -->
+            <div class="span-controls" *ngIf="selectedCell?.id === cell.id && !isPreviewMode">
+              <!-- Row controls (bottom) -->
+              <div class="span-control-group span-row">
+                <button
+                  class="btn-span"
+                  (click)="decreaseRowSpan(cell, $event)"
+                  [disabled]="cell.rowSpan <= 1"
+                  title="Shrink height"
+                >
+                  ➖
+                </button>
+                <span class="span-label">{{ cell.rowSpan }}</span>
+                <button
+                  class="btn-span"
+                  (click)="increaseRowSpan(cell, $event)"
+                  [disabled]="!canIncreaseRowSpan(cell)"
+                  title="Expand height by 1"
+                >
+                  ➕
+                </button>
+                <button
+                  class="btn-span btn-expand-all"
+                  (click)="expandToFillColumn(cell, $event)"
+                  [disabled]="!canExpandToFillColumn(cell)"
+                  title="Expand to fill column"
+                >
+                  ⬇️
+                </button>
+              </div>
+
+              <!-- Column controls (right) -->
+              <div class="span-control-group span-col">
+                <button
+                  class="btn-span"
+                  (click)="decreaseColSpan(cell, $event)"
+                  [disabled]="cell.colSpan <= 1"
+                  title="Shrink width"
+                >
+                  ➖
+                </button>
+                <span class="span-label">{{ cell.colSpan }}</span>
+                <button
+                  class="btn-span"
+                  (click)="increaseColSpan(cell, $event)"
+                  [disabled]="!canIncreaseColSpan(cell)"
+                  title="Expand width by 1"
+                >
+                  ➕
+                </button>
+                <button
+                  class="btn-span btn-expand-all"
+                  (click)="expandToFillRow(cell, $event)"
+                  [disabled]="!canExpandToFillRow(cell)"
+                  title="Expand to fill row"
+                >
+                  ➡️
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column Dividers (hidden in preview) -->
+        <div
+          *ngFor="let dividerIndex of getColumnDividers()"
+          class="column-divider"
+          [class.hidden]="isPreviewMode"
+          [class.dragging]="isDraggingColumnDivider && draggedDividerIndex === dividerIndex"
+          [style.left]="getColumnDividerPosition(dividerIndex)"
+          (mousedown)="!isPreviewMode && onColumnDividerMouseDown($event, dividerIndex)"
+          title="Drag to resize columns"
+        ></div>
+
+        <!-- Row Dividers (hidden in preview) -->
+        <div
+          *ngFor="let dividerIndex of getRowDividers()"
+          class="row-divider"
+          [class.hidden]="isPreviewMode"
+          [class.dragging]="isDraggingRowDivider && draggedDividerIndex === dividerIndex"
+          [style.top]="getRowDividerPosition(dividerIndex)"
+          (mousedown)="!isPreviewMode && onRowDividerMouseDown($event, dividerIndex)"
+          title="Drag to resize rows"
+        ></div>
+      </div>
+
+      <!-- Selected Cell Info (hidden in preview) -->
+      <div class="info-panel" *ngIf="selectedCell && !isPreviewMode">
         <strong>Selected Cell:</strong>
         <span class="info-detail">
           Position: Row {{ selectedCell.row }}, Col {{ selectedCell.col }}

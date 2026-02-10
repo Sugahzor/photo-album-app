@@ -16,6 +16,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   gridRows = 4;
   gridCols = 4;
+  columnWidths: number[] = []; // fr units for each column
+  rowHeights: number[] = []; // fr units for each row
 
   isDraggingFile = false;
   isDraggingFromSidebar = false;
@@ -24,11 +26,18 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   selectedCell: GridCell | null = null;
   isDraggingPhoto = false;
 
+  // Grid resizing
+  isDraggingColumnDivider = false;
+  isDraggingRowDivider = false;
+  draggedDividerIndex = -1;
+  dividerDragStart = 0;
+
   dragStartX = 0;
   dragStartY = 0;
   originalPhotoPosition = { x: 0, y: 0, scale: 1 };
 
   hoveredCell: GridCell | null = null;
+  isPreviewMode = false;
 
   ngOnInit() {
     this.initializeGrid();
@@ -46,6 +55,9 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   initializeGrid() {
     this.cells = [];
+    this.columnWidths = Array(this.gridCols).fill(1); // Equal widths
+    this.rowHeights = Array(this.gridRows).fill(1); // Equal heights
+
     let id = 0;
     for (let row = 1; row <= this.gridRows; row++) {
       for (let col = 1; col <= this.gridCols; col++) {
@@ -81,35 +93,74 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     this.isDraggingFile = false;
 
     const files = event.dataTransfer?.files;
-    if (files) {
+    if (files && files.length > 0) {
       this.handleFiles(Array.from(files));
     }
   }
 
   onFileSelect(event: Event) {
     const input = event.target as HTMLInputElement;
-    if (input.files) {
+    if (input.files && input.files.length > 0) {
+      console.log('Files selected:', input.files.length);
       this.handleFiles(Array.from(input.files));
+      input.value = '';
     }
   }
 
   handleFiles(files: File[]) {
+    console.log('handleFiles called with', files.length, 'files');
+
     const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    console.log('Image files:', imageFiles.length);
+
     const remainingSlots = this.maxPhotos - this.uploadedPhotos.length;
     const filesToProcess = imageFiles.slice(0, remainingSlots);
 
-    filesToProcess.forEach((file) => {
+    if (filesToProcess.length === 0) {
+      if (imageFiles.length === 0) {
+        alert('No image files selected. Please select image files (jpg, png, etc.)');
+      } else {
+        alert(
+          `Maximum ${this.maxPhotos} photos allowed. You already have ${this.uploadedPhotos.length} photos.`,
+        );
+      }
+      return;
+    }
+
+    let loadedCount = 0;
+    const totalToLoad = filesToProcess.length;
+
+    filesToProcess.forEach((file, index) => {
       const reader = new FileReader();
+
       reader.onload = (e) => {
-        const photoData: PhotoData = {
-          id: `photo-${Date.now()}-${Math.random()}`,
-          file: file,
-          dataUrl: e.target?.result as string,
-          position: { x: 50, y: 50, scale: 1 },
-          rotation: 0,
-        };
-        this.uploadedPhotos.push(photoData);
+        const result = e.target?.result;
+        if (typeof result === 'string') {
+          const photoData: PhotoData = {
+            id: `photo-${Date.now()}-${Math.random()}-${index}`,
+            file: file,
+            dataUrl: result,
+            position: { x: 50, y: 50, scale: 1 },
+            rotation: 0,
+          };
+
+          this.uploadedPhotos.push(photoData);
+          loadedCount++;
+
+          console.log(`Loaded ${loadedCount}/${totalToLoad}:`, file.name);
+
+          if (loadedCount === totalToLoad) {
+            this.uploadedPhotos = [...this.uploadedPhotos];
+            console.log('All photos loaded. Total:', this.uploadedPhotos.length);
+          }
+        }
       };
+
+      reader.onerror = (error) => {
+        console.error('Error reading file:', file.name, error);
+        loadedCount++;
+      };
+
       reader.readAsDataURL(file);
     });
   }
@@ -177,10 +228,129 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     this.hoveredCell = null;
   }
 
+  // ==================== GRID RESIZING ====================
+
+  onColumnDividerMouseDown(event: MouseEvent, columnIndex: number) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.isDraggingColumnDivider = true;
+    this.draggedDividerIndex = columnIndex;
+    this.dragStartX = event.clientX;
+
+    const onMouseMove = (e: MouseEvent) => this.onColumnDividerMouseMove(e);
+    const onMouseUp = () => {
+      this.isDraggingColumnDivider = false;
+      this.draggedDividerIndex = -1;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+  onColumnDividerMouseMove(event: MouseEvent) {
+    if (!this.isDraggingColumnDivider || this.draggedDividerIndex === -1) return;
+
+    const canvas = document.querySelector('.grid-canvas') as HTMLElement;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const totalWidth = rect.width; // No gap subtraction
+
+    const deltaX = event.clientX - this.dragStartX;
+    const deltaFraction = (deltaX / totalWidth) * this.getTotalColumnFr();
+
+    const leftCol = this.draggedDividerIndex;
+    const rightCol = this.draggedDividerIndex + 1;
+
+    const minSize = 0.2;
+
+    const newLeftWidth = Math.max(minSize, this.columnWidths[leftCol] + deltaFraction);
+    const newRightWidth = Math.max(minSize, this.columnWidths[rightCol] - deltaFraction);
+
+    if (newLeftWidth >= minSize && newRightWidth >= minSize) {
+      this.columnWidths[leftCol] = newLeftWidth;
+      this.columnWidths[rightCol] = newRightWidth;
+      this.dragStartX = event.clientX;
+    }
+  }
+
+  onRowDividerMouseDown(event: MouseEvent, rowIndex: number) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.isDraggingRowDivider = true;
+    this.draggedDividerIndex = rowIndex;
+    this.dragStartY = event.clientY;
+
+    const onMouseMove = (e: MouseEvent) => this.onRowDividerMouseMove(e);
+    const onMouseUp = () => {
+      this.isDraggingRowDivider = false;
+      this.draggedDividerIndex = -1;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+  onRowDividerMouseMove(event: MouseEvent) {
+    if (!this.isDraggingRowDivider || this.draggedDividerIndex === -1) return;
+
+    const canvas = document.querySelector('.grid-canvas') as HTMLElement;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const totalHeight = rect.height; // No gap subtraction
+
+    const deltaY = event.clientY - this.dragStartY;
+    const deltaFraction = (deltaY / totalHeight) * this.getTotalRowFr();
+
+    const topRow = this.draggedDividerIndex;
+    const bottomRow = this.draggedDividerIndex + 1;
+
+    const minSize = 0.2;
+
+    const newTopHeight = Math.max(minSize, this.rowHeights[topRow] + deltaFraction);
+    const newBottomHeight = Math.max(minSize, this.rowHeights[bottomRow] - deltaFraction);
+
+    if (newTopHeight >= minSize && newBottomHeight >= minSize) {
+      this.rowHeights[topRow] = newTopHeight;
+      this.rowHeights[bottomRow] = newBottomHeight;
+      this.dragStartY = event.clientY;
+    }
+  }
+
+  getTotalColumnFr(): number {
+    return this.columnWidths.reduce((sum, width) => sum + width, 0);
+  }
+
+  getTotalRowFr(): number {
+    return this.rowHeights.reduce((sum, height) => sum + height, 0);
+  }
+
+  getGridTemplateColumns(): string {
+    return this.columnWidths.map((w) => `${w}fr`).join(' ');
+  }
+
+  getGridTemplateRows(): string {
+    return this.rowHeights.map((h) => `${h}fr`).join(' ');
+  }
+
+  resetColumnWidths() {
+    this.columnWidths = Array(this.gridCols).fill(1);
+  }
+
+  resetRowHeights() {
+    this.rowHeights = Array(this.gridRows).fill(1);
+  }
+
   // ==================== GRID MANAGEMENT ====================
 
   addRow() {
     this.gridRows++;
+    this.rowHeights.push(1); // Add new row with default height
     const newRow = this.gridRows;
     let id = this.cells.length;
 
@@ -207,11 +377,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     }
 
     this.cells = this.cells.filter((c) => c.row !== this.gridRows);
+    this.rowHeights.pop(); // Remove last row height
     this.gridRows--;
   }
 
   addColumn() {
     this.gridCols++;
+    this.columnWidths.push(1); // Add new column with default width
     const newCol = this.gridCols;
     let id = this.cells.length;
 
@@ -238,6 +410,7 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     }
 
     this.cells = this.cells.filter((c) => c.col !== this.gridCols);
+    this.columnWidths.pop(); // Remove last column width
     this.gridCols--;
   }
 
@@ -254,7 +427,6 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   }
 
   onCanvasClick(event: MouseEvent) {
-    // Only deselect if clicking directly on the canvas, not on cells
     if (event.target === event.currentTarget) {
       this.selectedCell = null;
     }
@@ -280,14 +452,12 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     const deletedRowSpan = cell.rowSpan;
     const deletedColSpan = cell.colSpan;
 
-    // Remove the cell
     this.cells = this.cells.filter((c) => c.id !== cell.id);
 
     if (this.selectedCell?.id === cell.id) {
       this.selectedCell = null;
     }
 
-    // Auto-expand adjacent cells with proper boundary checks
     this.autoExpandAdjacentCells(deletedRow, deletedCol, deletedRowSpan, deletedColSpan);
   }
 
@@ -297,11 +467,9 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     deletedRowSpan: number,
     deletedColSpan: number,
   ) {
-    // Calculate the area that was freed up
     const deletedRowEnd = deletedRow + deletedRowSpan - 1;
     const deletedColEnd = deletedCol + deletedColSpan - 1;
 
-    // Try to expand cell above (same column position and width)
     if (deletedRow > 1) {
       const cellAbove = this.cells.find(
         (c) =>
@@ -310,11 +478,10 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
       if (cellAbove && this.canExpandDownSafely(cellAbove, deletedRowSpan, deletedColSpan)) {
         cellAbove.rowSpan += deletedRowSpan;
-        return; // Successfully expanded, stop here
+        return;
       }
     }
 
-    // Try to expand cell to the left (same row position and height)
     if (deletedCol > 1) {
       const cellLeft = this.cells.find(
         (c) =>
@@ -323,23 +490,19 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
       if (cellLeft && this.canExpandRightSafely(cellLeft, deletedColSpan, deletedRowSpan)) {
         cellLeft.colSpan += deletedColSpan;
-        return; // Successfully expanded, stop here
+        return;
       }
     }
   }
 
   canExpandDownSafely(cell: GridCell, additionalRows: number, requiredColSpan: number): boolean {
-    // Check if cell can expand down by additionalRows
-    // Must match the exact column span and not hit any other cells
     const targetRow = cell.row + cell.rowSpan;
     const targetRowEnd = targetRow + additionalRows - 1;
 
-    // Verify the freed space matches our column span exactly
     if (cell.colSpan !== requiredColSpan) {
       return false;
     }
 
-    // Check if the space is completely clear
     for (let row = targetRow; row <= targetRowEnd; row++) {
       for (let col = cell.col; col < cell.col + cell.colSpan; col++) {
         const blocking = this.cells.find(
@@ -356,22 +519,17 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Check if within grid bounds
     return targetRowEnd <= this.gridRows;
   }
 
   canExpandRightSafely(cell: GridCell, additionalCols: number, requiredRowSpan: number): boolean {
-    // Check if cell can expand right by additionalCols
-    // Must match the exact row span and not hit any other cells
     const targetCol = cell.col + cell.colSpan;
     const targetColEnd = targetCol + additionalCols - 1;
 
-    // Verify the freed space matches our row span exactly
     if (cell.rowSpan !== requiredRowSpan) {
       return false;
     }
 
-    // Check if the space is completely clear
     for (let col = targetCol; col <= targetColEnd; col++) {
       for (let row = cell.row; row < cell.row + cell.rowSpan; row++) {
         const blocking = this.cells.find(
@@ -388,7 +546,6 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Check if within grid bounds
     return targetColEnd <= this.gridCols;
   }
 
@@ -688,6 +845,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
       name: 'My Photo Album',
       gridRows: this.gridRows,
       gridCols: this.gridCols,
+      columnWidths: [...this.columnWidths],
+      rowHeights: [...this.rowHeights],
       cells: this.cells
         .filter((cell) => this.isVisible(cell))
         .map((cell) => ({
@@ -711,6 +870,8 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
   loadLayoutData(savedLayout: SavedLayout) {
     this.gridRows = savedLayout.gridRows;
     this.gridCols = savedLayout.gridCols;
+    this.columnWidths = [...savedLayout.columnWidths];
+    this.rowHeights = [...savedLayout.rowHeights];
     this.cells = [];
     this.uploadedPhotos = [];
 
@@ -753,6 +914,13 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
     alert('Layout data logged to console. Check browser console (F12)');
   }
 
+  togglePreviewMode() {
+    this.isPreviewMode = !this.isPreviewMode;
+    if (this.isPreviewMode) {
+      this.selectedCell = null; // Deselect any selected cell
+    }
+  }
+
   // ==================== VIEW HELPERS ====================
 
   getPhotoCountText(): string {
@@ -782,5 +950,31 @@ export class PhotoUploadComponent implements OnInit, OnDestroy {
 
   getVisibleCells(): GridCell[] {
     return this.cells.filter((cell) => this.isVisible(cell));
+  }
+
+  getColumnDividers(): number[] {
+    return Array.from({ length: this.gridCols - 1 }, (_, i) => i);
+  }
+
+  getRowDividers(): number[] {
+    return Array.from({ length: this.gridRows - 1 }, (_, i) => i);
+  }
+
+  getColumnDividerPosition(dividerIndex: number): string {
+    // Calculate the position as a percentage
+    const sumWidths = this.columnWidths.slice(0, dividerIndex + 1).reduce((a, b) => a + b, 0);
+    const totalFr = this.getTotalColumnFr();
+    const percentage = (sumWidths / totalFr) * 100;
+
+    return `${percentage}%`;
+  }
+
+  getRowDividerPosition(dividerIndex: number): string {
+    // Calculate the position as a percentage
+    const sumHeights = this.rowHeights.slice(0, dividerIndex + 1).reduce((a, b) => a + b, 0);
+    const totalFr = this.getTotalRowFr();
+    const percentage = (sumHeights / totalFr) * 100;
+
+    return `${percentage}%`;
   }
 }
